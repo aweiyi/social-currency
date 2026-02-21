@@ -106,5 +106,8 @@ export function attemptAbsorption(token, volunteer, pool) {
   return {
     tokenStatus: cover >= amount ? "pooled" : "defaulted",
     pool: newPool,
+    absorbedAmount: cover,
+    remainingAmount: Math.max(0, amount - cover),
+    reason: cover >= amount ? "full_coverage" : categoryBalance > 0 ? "partial_coverage" : "no_funds"
   };
 }

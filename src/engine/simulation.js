@@ -45,7 +45,7 @@ function pickNeedCategory(agent, random) {
     if (r <= 0) return k;
   }
   return keys[keys.length - 1];
-  }
+}
 
 /**
  * Find best provider for a category: active, has capacity, has skill in category, highest reputation in that category.
@@ -123,7 +123,15 @@ export function simulateTick(state, random = Math.random) {
       };
       transactions.push(tx);
       if (hours >= LARGE_TRADE_HOURS) {
-        events.push({ type: "large_trade", tick: state.tick + 1, from: requester.id, to: provider.id, hours, method: "fiat" });
+        events.push({
+          type: "large_trade",
+          tick: state.tick + 1,
+          from: requester.id,
+          to: provider.id,
+          hours,
+          method: "fiat",
+          message: `${requester.name} paid $${decision.amount.toFixed(0)} to ${provider.name} for ${hours.toFixed(1)}h of ${category}.`
+        });
       }
       continue;
     }
@@ -169,7 +177,15 @@ export function simulateTick(state, random = Math.random) {
     };
     transactions.push(tx);
     if (hours >= LARGE_TRADE_HOURS) {
-      events.push({ type: "large_trade", tick: state.tick + 1, from: requester.id, to: provider.id, hours, method: "social_token" });
+      events.push({
+        type: "large_trade",
+        tick: state.tick + 1,
+        from: requester.id,
+        to: provider.id,
+        hours,
+        method: "social_token",
+        message: `${provider.name} accepted ${hours.toFixed(1)}h of ${requester.name}'s tokens for ${category}.`
+      });
     }
   }
 
@@ -211,16 +227,47 @@ export function simulateTick(state, random = Math.random) {
     if (random() >= DEFAULT_PROBABILITY) continue;
     agent.isActive = false;
     const defaultedIds = getDefaultedTokenIds(agent.id, tokens);
-    events.push({ type: "default", tick: state.tick + 1, agentId: agent.id, name: agent.name, tokenCount: defaultedIds.length });
+    const affectedHolders = new Set();
+    let totalDebt = 0;
+
     for (const tid of defaultedIds) {
       const token = tokens.find((t) => t.id === tid);
-          if (!token) continue;
+      if (token) {
+        affectedHolders.add(token.holder);
+        totalDebt += token.amount;
+      }
+    }
+
+    events.push({
+      type: "default",
+      tick: state.tick + 1,
+      agentId: agent.id,
+      name: agent.name,
+      tokenCount: defaultedIds.length,
+      totalDebt,
+      affectedHolders: affectedHolders.size,
+      message: `CRITICAL: ${agent.name} has defaulted! ${defaultedIds.length} tokens ($${totalDebt.toFixed(1)}h) across ${affectedHolders.size} holders are now at risk.`
+    });
+
+    for (const tid of defaultedIds) {
+      const token = tokens.find((t) => t.id === tid);
+      if (!token) continue;
       token.status = "defaulted";
       const result = attemptAbsorption(token, null, pool);
       pool = result.pool;
-      if (result.tokenStatus === "pooled") token.status = "pooled";
+
       if (result.tokenStatus === "pooled") {
-        events.push({ type: "pool_claim", tick: state.tick + 1, tokenId: tid, category: token.category, amount: token.amount });
+        token.status = "pooled";
+        events.push({
+          type: "pool_claim",
+          tick: state.tick + 1,
+          tokenId: tid,
+          category: token.category,
+          amount: token.amount,
+          issuerName: agent.name,
+          reason: result.reason,
+          message: `Pool absorbed ${token.amount.toFixed(1)}h of ${agent.name}'s ${token.category} debt.`
+        });
       }
     }
     transactions.push({
@@ -267,6 +314,7 @@ export function simulateTick(state, random = Math.random) {
           previousPrice: prev,
           newPrice: agent.marketPrice,
           changePercent: change * 100,
+          message: `${agent.name}'s token price ${change > 0 ? 'surged' : 'dropped'} by ${(Math.abs(change) * 100).toFixed(1)}% to ${agent.marketPrice.toFixed(2)}.`
         });
       }
     }
